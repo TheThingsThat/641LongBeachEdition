@@ -15,7 +15,7 @@ import com.pedropathing.follower.Follower;
 import com.pedropathing.paths.PathChain;
 import com.pedropathing.geometry.Pose;
 
-@Autonomous(name = "BlueFarAuto", group = "Autonomous")
+@Autonomous(name = "Blue Far")
 @Configurable // Panels
 public class BlueFarAuto extends OpMode {
     private TelemetryManager panelsTelemetry; // Panels Telemetry instance

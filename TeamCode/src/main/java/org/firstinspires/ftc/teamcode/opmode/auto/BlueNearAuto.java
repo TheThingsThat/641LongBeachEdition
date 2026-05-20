@@ -17,7 +17,7 @@ import org.firstinspires.ftc.teamcode.configs.RobotConstants;
 import org.firstinspires.ftc.teamcode.configs.Shooter;
 import org.firstinspires.ftc.teamcode.configs.pedroPathing.Constants;
 
-@Autonomous(name = "Blue 18 ball normal")
+@Autonomous(name = "Blue Near")
 public class BlueNearAuto extends OpMode {
     // ── Shooter velocity PID state ────────────────────────────────────────────
     private double pidIntegral   = 0.0;

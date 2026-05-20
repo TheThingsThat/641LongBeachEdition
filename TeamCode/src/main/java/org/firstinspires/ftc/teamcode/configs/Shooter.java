@@ -7,14 +7,12 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
-import com.qualcomm.robotcore.robot.Robot;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
 public class Shooter {
 
     // ─── Hardware ────────────────────────────────────────────────────────────
-
     public final DcMotor shooterR, shooterL, turretMotor;
     public final Servo   hoodServo;
 
@@ -22,34 +20,27 @@ public class Shooter {
     private final Telemetry telemetry;
 
     // ─── Turret PID state ────────────────────────────────────────────────────
-
     private double turretIntegral  = 0.0;
     private double turretLastError = 0.0;
     private long   turretLastNs    = 0;
 
     // ─── Flywheel PID state ──────────────────────────────────────────────────
-
-    private double pidIntegral      = 0.0;
-    private double pidLastError     = 0.0;
+    private double pidIntegral       = 0.0;
+    private double pidLastError      = 0.0;
     private double lastFlywheelPower = 0.0;
-    private int    lastEncoderPos   = 0;
-    private long   lastFlywheelNs   = 0;
+    private int    lastEncoderPos    = 0;
+    private long   lastFlywheelNs    = 0;
 
-    // ─── Calculated targets (written by calculateTargets / set externally) ───
-
+    // ─── Calculated targets ──────────────────────────────────────────────────
     public int    turretTargetTicks  = 0;
     public double targetFlywheelTPS  = 0.0;
     public double targetHoodServoPos = 0.5;
 
-    public int     turretPhysicalOffset = 0;
-
+    public int turretPhysicalOffset = 0;
 
     // ─── Telemetry outputs ───────────────────────────────────────────────────
-
     public double lastTurretRelDeg = 0.0;
     public double lastFlywheelTPS  = 0.0;
-
-    // ─── Constructor ─────────────────────────────────────────────────────────
 
     public Shooter(HardwareMap hardwareMap, Follower follower, Telemetry telemetry) {
         this.follower  = follower;
@@ -69,23 +60,19 @@ public class Shooter {
         shooterL.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
 
         turretMotor.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-//        turretMotor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
-
         turretMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         lastEncoderPos = shooterR.getCurrentPosition();
-        lastFlywheelNs = System.nanoTime();
-        turretLastNs   = System.nanoTime();
+        long now       = System.nanoTime();
+        lastFlywheelNs = now;
+        turretLastNs   = now;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // TARGET CALCULATION
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Calculates all three targets from a goal pose in one call.
-     * Sets turretTargetTicks, targetFlywheelTPS, and targetHoodServoPos.
-     */
+    /** Calculates turret, flywheel, and hood targets from a goal pose. */
     public void calculateTargets(Pose gatePose) {
         double dist = getRobotDistanceToGoal(gatePose);
         calculateTurretTarget(gatePose.getX(), gatePose.getY());
@@ -93,34 +80,25 @@ public class Shooter {
         targetHoodServoPos = hoodAngle(dist);
     }
 
-    /**
-     * Calculates only the turret target from a field point.
-     */
+    /** Sets turretTargetTicks from a field point. */
     public void calculateTurretTarget(double tx, double ty) {
         Pose   pose           = follower.getPose();
-        double dx             = tx - pose.getX();
-        double dy             = ty - pose.getY();
-        double targetFieldRad = Math.atan2(dy, dx);
+        double targetFieldRad = Math.atan2(ty - pose.getY(), tx - pose.getX());
         double turretRelRad   = wrapRad(targetFieldRad - pose.getHeading());
 
         lastTurretRelDeg  = Math.toDegrees(turretRelRad);
         turretTargetTicks = (int) Math.round(-lastTurretRelDeg * RobotConstants.TICKS_PER_DEGREE);
     }
 
-    /**
-     * Flywheel speed (TPS) from distance (inches).
-     * flywheelOffset is an additive trim, applied before the upper clamp.
-     */
+    /** Flywheel speed (TPS) from distance (inches). */
     public static double flywheelSpeed(double goalDist) {
         double raw = -0.0300158 * goalDist * goalDist
                 + 10.75769 * goalDist
                 + 450;
-        return MathFunctions.clamp(raw + RobotConstants.flywheelOffset,0,3000);
+        return MathFunctions.clamp(raw + RobotConstants.flywheelOffset, 0, 3000);
     }
 
-    /**
-     * Hood servo position from distance (inches).
-     */
+    /** Hood servo position from distance (inches). */
     public static double hoodAngle(double goalDist) {
         double raw = 0.00010237 * goalDist * goalDist
                 - 0.0247299 * goalDist
@@ -128,9 +106,7 @@ public class Shooter {
         return MathFunctions.clamp(raw + RobotConstants.hoodOffset, RobotConstants.hoodServoMin, RobotConstants.hoodServoMax);
     }
 
-    /**
-     * Straight-line distance (inches) from the robot to a field pose.
-     */
+    /** Straight-line distance (inches) from the robot to a field pose. */
     public double getRobotDistanceToGoal(Pose gatePose) {
         Pose   pose = follower.getPose();
         double dx   = gatePose.getX() - pose.getX();
@@ -142,38 +118,31 @@ public class Shooter {
     // HARDWARE DRIVE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Runs the turret PID toward turretTargetTicks.
-     * turretLastNs is updated unconditionally so the D-term does not spike
-     * on re-engagement after an alignment hold.
-     */
+    /** Runs the turret PID toward turretTargetTicks. */
     public void driveTurret() {
-        int  currentTicks = turretMotor.getCurrentPosition();
-        int  errorTicks   = turretTargetTicks - currentTicks;
+        int currentTicks = turretMotor.getCurrentPosition();
+        int errorTicks   = turretTargetTicks - currentTicks;
 
         long   nowNs = System.nanoTime();
         double dtSec = clamp((nowNs - turretLastNs) / 1e9, 0.0005, 0.05);
-        turretLastNs = nowNs; // always update — prevents D-term spike on re-engagement
+        turretLastNs = nowNs; // always update to prevent D-term spike on re-engagement
 
-        double pTerm = RobotConstants.TURRET_KP * errorTicks;
+        double errorDeg = Math.abs(errorTicks) / RobotConstants.TICKS_PER_DEGREE;
+        boolean aligned = errorDeg <= RobotConstants.ppModeAngleTolerance;
 
-        turretIntegral += errorTicks * dtSec;
-        double iTerm = clamp(
-                RobotConstants.TURRET_KI * turretIntegral,
-                -RobotConstants.TURRET_I_MAX, RobotConstants.TURRET_I_MAX);
-
-        double dTerm = RobotConstants.TURRET_KD * (errorTicks - turretLastError) / dtSec;
-
-        double output = clamp(pTerm + iTerm + dTerm,
-                -RobotConstants.TURRET_MAX_POWER, RobotConstants.TURRET_MAX_POWER);
-
-        double  errorDeg = Math.abs(errorTicks) / RobotConstants.TICKS_PER_DEGREE;
-        boolean aligned  = errorDeg <= RobotConstants.ppModeAngleTolerance;
-
+        double output = 0.0;
         if (aligned) {
             turretMotor.setPower(0.0);
             turretIntegral = 0.0;
         } else {
+            double pTerm = RobotConstants.TURRET_KP * errorTicks;
+            turretIntegral += errorTicks * dtSec;
+            double iTerm = clamp(RobotConstants.TURRET_KI * turretIntegral,
+                    -RobotConstants.TURRET_I_MAX, RobotConstants.TURRET_I_MAX);
+            double dTerm = RobotConstants.TURRET_KD * (errorTicks - turretLastError) / dtSec;
+
+            output = clamp(pTerm + iTerm + dTerm,
+                    -RobotConstants.TURRET_MAX_POWER, RobotConstants.TURRET_MAX_POWER);
             if (Math.abs(output) < RobotConstants.TURRET_MIN_POWER) output = 0.0;
             turretMotor.setPower(output);
         }
@@ -182,14 +151,10 @@ public class Shooter {
         telemetry.addData("TurretRelDeg",  "%.1f", lastTurretRelDeg);
         telemetry.addData("TurretTarget",  "%d",   turretTargetTicks);
         telemetry.addData("TurretCurrent", "%d",   currentTicks);
-        telemetry.addData("TurretOut",     "%.3f", aligned ? 0.0 : output);
+        telemetry.addData("TurretOut",     "%.3f", output);
     }
 
-    /**
-     * Manual turret override. Resets PID integrators so auto-tracking resumes
-     * cleanly when switched back.
-     * @param power positive = clockwise, negative = counter-clockwise.
-     */
+    /** Manual turret override. Resets PID state so auto-tracking resumes cleanly. */
     public void driveManualTurret(double power) {
         turretMotor.setPower(power);
         turretIntegral  = 0.0;
@@ -198,16 +163,15 @@ public class Shooter {
 
     /**
      * Runs the flywheel velocity PID toward targetFlywheelTPS.
-     * On a very fast loop (dt ≤ 1 ms) the last known power is re-applied
-     * rather than sending 0, so the flywheel is never starved.
-     * @return motor power applied [0..1].
+     * On a very fast loop (dt ≤ 1 ms) the last known power is re-applied so the
+     * flywheel is never starved.
      */
     public double driveFlywheels(boolean shooterOn) {
         if (!shooterOn) {
             shooterR.setPower(0.0);
             shooterL.setPower(0.0);
-            pidIntegral      = 0.0;
-            pidLastError     = 0.0;
+            pidIntegral       = 0.0;
+            pidLastError      = 0.0;
             lastFlywheelPower = 0.0;
             return 0.0;
         }
@@ -226,16 +190,13 @@ public class Shooter {
         lastFlywheelTPS    = velocityTPS;
 
         double error = targetFlywheelTPS - velocityTPS;
-
         double pTerm = RobotConstants.FLYWHEEL_KP * error;
 
         pidIntegral += error * dtSec;
-        double iTerm = clamp(
-                RobotConstants.FLYWHEEL_KI * pidIntegral,
+        double iTerm = clamp(RobotConstants.FLYWHEEL_KI * pidIntegral,
                 -RobotConstants.SHOOTER_I_MAX, RobotConstants.SHOOTER_I_MAX);
 
         double dTerm = RobotConstants.FLYWHEEL_KD * (error - pidLastError) / dtSec;
-
         double power = clamp(pTerm + iTerm + dTerm, 0.0, 1.0);
 
         shooterR.setPower(power);
@@ -254,9 +215,7 @@ public class Shooter {
         return power;
     }
 
-    /**
-     * Writes targetHoodServoPos to the hood servo.
-     */
+    /** Writes targetHoodServoPos to the hood servo. */
     public void driveHood() {
         double pos = clamp(targetHoodServoPos, RobotConstants.hoodServoMin, RobotConstants.hoodServoMax);
         hoodServo.setPosition(pos);
@@ -267,15 +226,11 @@ public class Shooter {
     // LOCKED / REDUNDANCY MODE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    /**
-     * Locked mode: all three axes driven to fixed constants from RobotConstants.
-     * Uses dedicated lockedTurretDeg / lockedHoodPos / lockedFlywheelTPS rather
-     * than the tracking-offset fields, which have a different meaning.
-     */
+    /** Locked mode: all three axes driven to fixed constants. */
     public void setLockedMode(boolean shooterOn) {
-        turretTargetTicks  = (int) Math.round(-RobotConstants.lockedTurretDeg * RobotConstants.TICKS_PER_DEGREE);
-        turretIntegral     = 0.0;
-        turretLastError    = 0.0;
+        turretTargetTicks = (int) Math.round(-RobotConstants.lockedTurretDeg * RobotConstants.TICKS_PER_DEGREE);
+        turretIntegral    = 0.0;
+        turretLastError   = 0.0;
         driveTurret();
 
         targetHoodServoPos = RobotConstants.lockedHoodPos;
