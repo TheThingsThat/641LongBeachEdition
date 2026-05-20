@@ -2,10 +2,13 @@ package org.firstinspires.ftc.teamcode.opmode.auto;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+
 import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.TelemetryManager;
 import com.bylazar.telemetry.PanelsTelemetry;
+
 import org.firstinspires.ftc.teamcode.configs.pedroPathing.Constants;
+
 import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.follower.Follower;
@@ -17,7 +20,7 @@ import com.pedropathing.geometry.Pose;
 public class BlueFarAuto extends OpMode {
     private TelemetryManager panelsTelemetry; // Panels Telemetry instance
     public Follower follower; // Pedro Pathing follower instance
-    private int pathState; // Current autonomous path state (state machine)
+    private int pathState; // Current autonomous path state
     private Paths paths; // Paths defined in the Paths class
 
     @Override
@@ -34,6 +37,11 @@ public class BlueFarAuto extends OpMode {
     }
 
     @Override
+    public void start() {
+        pathState = 0;
+    }
+
+    @Override
     public void loop() {
         follower.update(); // Update Pedro Pathing
         pathState = autonomousPathUpdate(); // Update autonomous state machine
@@ -43,6 +51,7 @@ public class BlueFarAuto extends OpMode {
         panelsTelemetry.debug("X", follower.getPose().getX());
         panelsTelemetry.debug("Y", follower.getPose().getY());
         panelsTelemetry.debug("Heading", follower.getPose().getHeading());
+        panelsTelemetry.debug("Busy", follower.isBusy());
         panelsTelemetry.update(telemetry);
     }
 
@@ -51,14 +60,16 @@ public class BlueFarAuto extends OpMode {
 
         public Paths(Follower follower) {
             MainChain = follower.pathBuilder()
+
                     .addPath(
                             new BezierCurve(
-                                    new Pose(50.000, 12.700),
+                                    new Pose(72.000, 8.000),
                                     new Pose(49.537, 35.108),
                                     new Pose(10.887, 35.511)
                             )
                     )
-                    .setLinearHeadingInterpolation(Math.toRadians(135), Math.toRadians(180))
+                    .setLinearHeadingInterpolation(Math.toRadians(90), Math.toRadians(180))
+
                     .addPath(
                             new BezierLine(
                                     new Pose(10.887, 35.511),
@@ -66,6 +77,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setConstantHeadingInterpolation(Math.toRadians(180))
+
                     .addPath(
                             new BezierLine(
                                     new Pose(49.778, 12.720),
@@ -73,6 +85,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setTangentHeadingInterpolation()
+
                     .addPath(
                             new BezierLine(
                                     new Pose(7.796, 10.443),
@@ -80,6 +93,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setConstantHeadingInterpolation(Math.toRadians(180))
+
                     .addPath(
                             new BezierCurve(
                                     new Pose(50.155, 9.673),
@@ -89,6 +103,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setTangentHeadingInterpolation()
+
                     .addPath(
                             new BezierLine(
                                     new Pose(13.461, 39.605),
@@ -96,6 +111,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setConstantHeadingInterpolation(Math.toRadians(135))
+
                     .addPath(
                             new BezierCurve(
                                     new Pose(49.746, 13.106),
@@ -105,6 +121,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setTangentHeadingInterpolation()
+
                     .addPath(
                             new BezierLine(
                                     new Pose(13.454, 39.573),
@@ -112,6 +129,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setConstantHeadingInterpolation(Math.toRadians(135))
+
                     .addPath(
                             new BezierCurve(
                                     new Pose(49.838, 12.860),
@@ -121,6 +139,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setTangentHeadingInterpolation()
+
                     .addPath(
                             new BezierLine(
                                     new Pose(13.451, 39.706),
@@ -128,6 +147,7 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setConstantHeadingInterpolation(Math.toRadians(135))
+
                     .addPath(
                             new BezierLine(
                                     new Pose(49.569, 12.356),
@@ -135,14 +155,27 @@ public class BlueFarAuto extends OpMode {
                             )
                     )
                     .setTangentHeadingInterpolation()
+
                     .build();
         }
     }
 
     public int autonomousPathUpdate() {
-        // Add your state machine Here
-        // Access paths with paths.pathName
-        // Refer to the Pedro Pathing Docs (Auto Example) for an example state machine
-        return 0;
+        switch (pathState) {
+            case 0:
+                follower.followPath(paths.MainChain, true);
+                return 1;
+
+            case 1:
+                if (!follower.isBusy()) {
+                    return 2;
+                }
+                return 1;
+
+            case 2:
+                return 2;
+        }
+
+        return pathState;
     }
 }
