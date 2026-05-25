@@ -7,16 +7,16 @@ import com.bylazar.configurables.annotations.Configurable;
 public class RobotConstants {
 
     // ─── Robot Poses ─────────────────────────────────────────────────────────
-    public static Pose blueGoal = new Pose(5.0, 140.0, 0);
+    public static Pose blueGoal = new Pose(6.5, 134, 0);
     public static Pose redGoal  = blueGoal.mirror();
 
-    public static Pose blueReset = new Pose(135, 9.0, 0); // robot faces red goal
-    public static Pose redReset  = new Pose(9.0, 9.0, 0); // robot faces opposing human player
+    public static Pose blueReset = new Pose(132, 9.5, Math.toRadians(90)); // robot faces red goal
+    public static Pose redReset  = blueReset.mirror();
 
     public static Pose blueAutoEnd = new Pose(63.9, 105.77, Math.toRadians(180));
     public static Pose redAutoEnd  = blueAutoEnd.mirror();
 
-    public static Pose startPose = new Pose(23.36, 117.00, Math.toRadians(180));
+    public static Pose startPose = new Pose(21.0, 122.0, Math.toRadians(143.5));
     public static Pose scorePose = new Pose(52,    79.2,   Math.toRadians(180));
     public static Pose parkPose  = new Pose(63.9,  105.77, Math.toRadians(180));
 
@@ -38,13 +38,14 @@ public class RobotConstants {
     public static Pose gatePose          = new Pose(17.4, 65.9, Math.toRadians(180));
 
     // ─── Hood ────────────────────────────────────────────────────────────────
-    public static double hoodServoMax = 0.790;
-    public static double hoodServoMin = 0.005;
+    public static double hoodServoMax = 0.79;
+    public static double hoodServoMin = 0.00;
 
     // ─── Flywheel / Shooter ──────────────────────────────────────────────────
-    public static double FLYWHEEL_KP = 0.045;
-    public static double FLYWHEEL_KI = 0.3;
-    public static double FLYWHEEL_KD = 0.001;
+    public static double FLYWHEEL_KP = 0.001;
+    public static double FLYWHEEL_KI = 0.000001;
+    public static double FLYWHEEL_KD = 0.0;
+    public static double FLYWHEEL_KF = 0.0005;
     public static double SHOOTER_I_MAX = 0.4;
 
     // ─── Turret ──────────────────────────────────────────────────────────────
@@ -73,12 +74,11 @@ public class RobotConstants {
     public static double fixedHoodPos     = 0.25;
 
     // ─── Full-Adjustable mode step sizes ─────────────────────────────────────
-    public static double adjustableHoodStep     = 0.02; // servo position per button press
-    public static double adjustableFlywheelStep = 50.0; // TPS per button press
+    public static double adjustableHoodStep     = 0.01; // servo position per button press
+    public static double adjustableFlywheelStep = 20.0; // TPS per button press
 
     // ─── Kicker ──────────────────────────────────────────────────────────────
     public static double kickerDownPos        = 0.35;
     public static double kickerUpPos          = 0.51;
-    public static double kickerStaggerSec     = 0.30; // triple-kick step interval
-    public static double kickerSinglePressSec = 1.0;  // RB single-press up→down dwell
+    public static double kickerSinglePressSec = 1.0; // RB single-press up→down dwell
 }

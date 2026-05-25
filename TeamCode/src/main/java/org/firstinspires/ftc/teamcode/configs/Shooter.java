@@ -92,17 +92,17 @@ public class Shooter {
 
     /** Flywheel speed (TPS) from distance (inches). */
     public static double flywheelSpeed(double goalDist) {
-        double raw = -0.0300158 * goalDist * goalDist
-                + 10.75769 * goalDist
-                + 450;
-        return MathFunctions.clamp(raw + RobotConstants.flywheelOffset, 0, 3000);
+        double raw = 0.00514 * goalDist * goalDist
+                + 4 * goalDist
+                + 736;
+        return MathFunctions.clamp(raw + RobotConstants.flywheelOffset, 0, 1250);
     }
 
     /** Hood servo position from distance (inches). */
     public static double hoodAngle(double goalDist) {
-        double raw = 0.00010237 * goalDist * goalDist
-                - 0.0247299 * goalDist
-                + 1.54;
+        double raw = 0.0000203 * goalDist * goalDist
+                - 0.00925 * goalDist
+                + 0.867;
         return MathFunctions.clamp(raw + RobotConstants.hoodOffset, RobotConstants.hoodServoMin, RobotConstants.hoodServoMax);
     }
 
@@ -190,6 +190,7 @@ public class Shooter {
         lastFlywheelTPS    = velocityTPS;
 
         double error = targetFlywheelTPS - velocityTPS;
+        double fTerm = RobotConstants.FLYWHEEL_KF * targetFlywheelTPS; // velocity feedforward
         double pTerm = RobotConstants.FLYWHEEL_KP * error;
 
         pidIntegral += error * dtSec;
@@ -197,7 +198,7 @@ public class Shooter {
                 -RobotConstants.SHOOTER_I_MAX, RobotConstants.SHOOTER_I_MAX);
 
         double dTerm = RobotConstants.FLYWHEEL_KD * (error - pidLastError) / dtSec;
-        double power = clamp(pTerm + iTerm + dTerm, 0.0, 1.0);
+        double power = clamp(fTerm + pTerm + iTerm + dTerm, 0.0, 1.0);
 
         shooterR.setPower(power);
         shooterL.setPower(power);

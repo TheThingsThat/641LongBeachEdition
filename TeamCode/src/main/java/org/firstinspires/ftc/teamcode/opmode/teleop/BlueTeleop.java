@@ -59,29 +59,31 @@ public class BlueTeleop extends OpMode {
     private Servo          rgbLight;
 
     // goBILDA RGB Indicator Light positions
-    private static final double RGB_RED    = 0.277; // 1100 μs — no item
-    private static final double RGB_YELLOW = 0.388; // 1300 μs — 1st pass
-    private static final double RGB_BLUE   = 0.611; // 1700 μs — 2nd pass
-    private static final double RGB_GREEN  = 0.500; // 1500 μs — 3rd pass
+    private static final double RGB_RED   = 0.277; // 1100 μs — no ball seated
+    private static final double RGB_GREEN = 0.500; // 1500 μs — ball seated at 3rd slot
+
+    // Intake-detect rumble thresholds
+    private static final double LASER_DETECT_RUMBLE_SEC = 0.5;  // continuous break needed to rumble
+    private static final double LASER_DEBOUNCE_OFF_SEC  = 0.05; // brief clears shorter than this don't reset the timer
+    private static final int    RUMBLE_MS               = 300;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // STATE
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private int     passCount    = 0;
-    private boolean lastDetected = false; // active-low beam state
+    // Debounced intake-detect state for the rumble trigger and RGB indicator.
+    private boolean           debouncedBeamBroken = false;
+    private boolean           rumbleFired         = false;
+    private final ElapsedTime beamBrokenTimer     = new ElapsedTime();
+    private final ElapsedTime beamClearTimer      = new ElapsedTime();
 
-    private boolean lastGp1A  = false; // intake toggle
-    private boolean lastGp1RB = false; // pass-count reset edge
+    private boolean lastGp1A = false; // intake toggle
 
     private boolean shooterOn = true;
     private boolean intakeOn  = true;
 
-    // Kicker triple-kick sequencer: 6 transitions ending in DOWN.
-    private boolean           kickerSeqActive = false;
-    private int               kickerSeqStep   = 0;
-    private final ElapsedTime kickerSeqTimer  = new ElapsedTime();
-    private boolean           lastGp1RT       = false;
+    // Right-trigger rising-edge tracker (pass-count reset).
+    private boolean lastGp1RT = false;
 
     // Kicker single-press (RB): UP, then DOWN after kickerSinglePressSec.
     private boolean           kickerSingleActive = false;
@@ -168,8 +170,8 @@ public class BlueTeleop extends OpMode {
         handleGamepad1();
         if      (mode == RobotMode.ADJUSTABLE) handleGamepad2Adjustable();
         else if (mode == RobotMode.AUTO)       handleGamepad2AutoOffsets();
-        handleKickerSequencer();
         handleKickerSinglePress();
+        handleKickerManual();
         handleLaserAndRgb();
         handlePoseReset();
 
@@ -181,7 +183,6 @@ public class BlueTeleop extends OpMode {
         telemetry.addData("Hood Actual",    "%.3f", shooter.hoodServo.getPosition());
         telemetry.addData("Robot Pose",     follower.getPose());
         telemetry.addData("Dist from Goal", "%.1f", shooter.getRobotDistanceToGoal(goalPose));
-        telemetry.addData("Pass Count",     passCount);
         telemetry.update();
     }
 
@@ -252,9 +253,10 @@ public class BlueTeleop extends OpMode {
     // ═══════════════════════════════════════════════════════════════════════════
     // GAMEPAD1 — active in ALL modes
     //   A             — toggle intake on/off
-    //   LB (held)     — run intake in reverse
-    //   RB            — single-press kick: UP then DOWN after kickerSinglePressSec
-    //   Right trigger — triple-kick sequence (ends in DOWN)
+    //   Left trigger  — run intake in reverse (-0.5 power, held)
+    //   Right trigger — single-press kick: UP then DOWN after kickerSinglePressSec
+    //   RB (held)     — kicker UP
+    //   LB (held)     — kicker DOWN
     // ═══════════════════════════════════════════════════════════════════════════
 
     private void handleGamepad1() {
@@ -262,74 +264,47 @@ public class BlueTeleop extends OpMode {
         if (gp1A && !lastGp1A) intakeOn = !intakeOn;
         lastGp1A = gp1A;
 
-        if (gamepad1.left_bumper) {
-            toggleMotor.setPower(-1.0);
+        if (gamepad1.left_trigger > 0.5) {
+            toggleMotor.setPower(-0.5);
         } else {
             toggleMotor.setPower(intakeOn ? 1.0 : 0.0);
         }
-
-        // Pass-count reset: RB rising edge OR RT rising edge.
-        // lastGp1RB is updated in handleKickerSinglePress; lastGp1RT in handleKickerSequencer.
-        boolean resetNow = (gamepad1.right_bumper && !lastGp1RB)
-                || (gamepad1.right_trigger > 0.5 && !lastGp1RT);
-        if (resetNow) passCount = 0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // KICKER TRIPLE-KICK SEQUENCER
-    //
-    // right_trigger rising edge starts a 6-step sequence (DOWN/UP/DOWN/UP/DOWN/UP);
-    // after step 5 the kicker is left in DOWN. Each step waits kickerStaggerSec.
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private void handleKickerSequencer() {
-        boolean gp1RT = gamepad1.right_trigger > 0.5;
-
-        if (gp1RT && !lastGp1RT && !kickerSeqActive) {
-            kickerSeqActive = true;
-            kickerSeqStep   = 0;
-            kickerSeqTimer.reset();
-            kickerServo.setPosition(RobotConstants.kickerDownPos);
-        }
-        lastGp1RT = gp1RT;
-
-        if (!kickerSeqActive) return;
-
-        if (kickerSeqTimer.seconds() >= RobotConstants.kickerStaggerSec) {
-            kickerSeqStep++;
-            kickerSeqTimer.reset();
-
-            if (kickerSeqStep >= 6) {
-                kickerServo.setPosition(RobotConstants.kickerDownPos);
-                kickerSeqActive = false;
-            } else {
-                kickerServo.setPosition(kickerSeqStep % 2 == 0
-                        ? RobotConstants.kickerDownPos
-                        : RobotConstants.kickerUpPos);
-            }
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // KICKER SINGLE-PRESS (right bumper)
+    // KICKER SINGLE-PRESS (right trigger)
     //
     // Rising edge → kicker UP. After kickerSinglePressSec elapses → kicker DOWN.
-    // Ignored while the triple-kick sequence is active.
     // ═══════════════════════════════════════════════════════════════════════════
 
     private void handleKickerSinglePress() {
-        boolean gp1RB = gamepad1.right_bumper;
+        boolean gp1RT = gamepad1.right_trigger > 0.5;
 
-        if (gp1RB && !lastGp1RB && !kickerSeqActive && !kickerSingleActive) {
+        if (gp1RT && !lastGp1RT && !kickerSingleActive) {
             kickerSingleActive = true;
             kickerSingleTimer.reset();
             kickerServo.setPosition(RobotConstants.kickerUpPos);
         }
-        lastGp1RB = gp1RB;
+        lastGp1RT = gp1RT;
 
         if (kickerSingleActive && kickerSingleTimer.seconds() >= RobotConstants.kickerSinglePressSec) {
             kickerServo.setPosition(RobotConstants.kickerDownPos);
             kickerSingleActive = false;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // KICKER MANUAL (bumpers)
+    //
+    // Right bumper held → kicker UP. Left bumper held → kicker DOWN.
+    // Runs after handleKickerSinglePress so manual bumpers override the auto cycle.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private void handleKickerManual() {
+        if (gamepad1.right_bumper) {
+            kickerServo.setPosition(RobotConstants.kickerUpPos);
+        } else if (gamepad1.left_bumper) {
+            kickerServo.setPosition(RobotConstants.kickerDownPos);
         }
     }
 
@@ -391,22 +366,43 @@ public class BlueTeleop extends OpMode {
 
     // ═══════════════════════════════════════════════════════════════════════════
     // LASER SENSOR & RGB INDICATOR
-    // Active-low: getState() == false means beam BROKEN. Pass count caps at 3.
+    // Active-low: getState() == false means beam BROKEN.
+    //
+    // The sensor sits at the 3rd-ball slot, so when the robot is full the beam
+    // stays continuously broken. We debounce the raw signal: clears shorter than
+    // LASER_DEBOUNCE_OFF_SEC are treated as flicker. When the beam has been
+    // stably broken for LASER_DETECT_RUMBLE_SEC, fire gamepad1.rumble(RUMBLE_MS)
+    // once and light the RGB green. Re-arms when the beam is genuinely clear.
     // ═══════════════════════════════════════════════════════════════════════════
 
     private void handleLaserAndRgb() {
         boolean beamBroken = !laserInput.getState();
 
-        if (beamBroken && !lastDetected) {
-            passCount++;
-            if (passCount > 3) passCount = 3;
-        }
-        lastDetected = beamBroken;
+        if (beamBroken) {
+            if (!debouncedBeamBroken) {
+                // Transition: clear → broken. If the prior "clear" was shorter
+                // than the debounce window, treat it as a flicker and KEEP the
+                // existing brokenTimer running. Otherwise, start fresh.
+                if (beamClearTimer.seconds() >= LASER_DEBOUNCE_OFF_SEC) {
+                    beamBrokenTimer.reset();
+                    rumbleFired = false;
+                }
+                debouncedBeamBroken = true;
+            }
 
-        if      (!beamBroken && passCount == 0) rgbLight.setPosition(RGB_RED);
-        else if (passCount == 1)                rgbLight.setPosition(RGB_YELLOW);
-        else if (passCount == 2)                rgbLight.setPosition(RGB_BLUE);
-        else if (passCount >= 3)                rgbLight.setPosition(RGB_GREEN);
+            if (!rumbleFired && beamBrokenTimer.seconds() >= LASER_DETECT_RUMBLE_SEC) {
+                gamepad1.rumble(RUMBLE_MS);
+                rumbleFired = true;
+            }
+        } else {
+            if (debouncedBeamBroken) {
+                // First tick of clear — start measuring the off-window.
+                beamClearTimer.reset();
+                debouncedBeamBroken = false;
+            }
+        }
+
+        rgbLight.setPosition(debouncedBeamBroken ? RGB_GREEN : RGB_RED);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
