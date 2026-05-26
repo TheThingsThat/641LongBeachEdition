@@ -23,7 +23,7 @@ public class BlueTeleop extends OpMode {
 
     /**
      * AUTO        — turret, flywheel, hood all driven by distance polynomials.
-     * TURRET_ONLY — turret auto-tracks; flywheel and hood at fixed constants.
+     * TURRET_ONTLY — turret auto-tracks; flywheel and hood at fixed constants.
      * FULL_MANUAL — turret, flywheel, hood all at fixed constants.
      * ADJUSTABLE  — turret auto-tracks; flywheel and hood adjustable via gamepad2.
      */
@@ -52,8 +52,7 @@ public class BlueTeleop extends OpMode {
 
     private DcMotor frontLeft, frontRight, backLeft, backRight;
     private DcMotor toggleMotor;
-    private Shooter shooter;
-    private Servo   kickerServo;
+    private Shooter shooter; // owns the kicker servo
 
     private DigitalChannel laserInput;
     private Servo          rgbLight;
@@ -82,12 +81,10 @@ public class BlueTeleop extends OpMode {
     private boolean shooterOn = true;
     private boolean intakeOn  = true;
 
-    // Right-trigger rising-edge tracker (pass-count reset).
-    private boolean lastGp1RT = false;
-
-    // Kicker single-press (RB): UP, then DOWN after kickerSinglePressSec.
-    private boolean           kickerSingleActive = false;
-    private final ElapsedTime kickerSingleTimer  = new ElapsedTime();
+    // Gamepad1 kicker rising-edge trackers.
+    private boolean lastGp1LB = false; // LB rising → single-press kick
+    private boolean lastGp1RB = false; // RB rising → triple kick (TIMED)
+    private boolean lastGp1RT = false; // RT rising → triple kick (FLYWHEEL-GATED)
 
     // ADJUSTABLE mode live values (seeded from fixed constants).
     private double adjustableHoodPos     = RobotConstants.fixedHoodPos;
@@ -118,8 +115,6 @@ public class BlueTeleop extends OpMode {
         frontRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         backLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         backRight.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
-
-        kickerServo = hardwareMap.get(Servo.class, "servo");
 
         toggleMotor = hardwareMap.get(DcMotor.class, "intake");
         toggleMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -152,12 +147,13 @@ public class BlueTeleop extends OpMode {
     @Override
     public void loop() {
         follower.update();
-
+        
+        // Robot-centric only in FULL_MANUAL; all other modes drive field-centric.
         follower.setTeleOpDrive(
                 gamepad1.left_stick_y,
                 gamepad1.left_stick_x,
                 -gamepad1.right_stick_x,
-                false
+                mode == RobotMode.FULL_MANUAL
         );
 
         handleModeSwitch();
@@ -170,8 +166,9 @@ public class BlueTeleop extends OpMode {
         handleGamepad1();
         if      (mode == RobotMode.ADJUSTABLE) handleGamepad2Adjustable();
         else if (mode == RobotMode.AUTO)       handleGamepad2AutoOffsets();
-        handleKickerSinglePress();
-        handleKickerManual();
+        handleKickerSinglePress(); // gp1 LB
+        handleKickerTriple();      // gp1 RB (timed) / RT (flywheel-gated)
+        handleKickerManual();      // gp1 LT held = UP, released = DOWN (suppressed while a sequence runs)
         handleLaserAndRgb();
         handlePoseReset();
 
@@ -251,12 +248,16 @@ public class BlueTeleop extends OpMode {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // GAMEPAD1 — active in ALL modes
+    // GAMEPAD1
     //   A             — toggle intake on/off
-    //   Left trigger  — run intake in reverse (-0.5 power, held)
-    //   Right trigger — single-press kick: UP then DOWN after kickerSinglePressSec
-    //   RB (held)     — kicker UP
-    //   LB (held)     — kicker DOWN
+    //   B             — pinpoint pose reset (handlePoseReset)
+    //   LT (held)     — kicker UP; release returns kicker DOWN
+    //   LB (rising)   — single-press kick (UP → auto DOWN after kickerSinglePressSec)
+    //   RB (rising)   — triple kick, TIMED (kickerTripleCycleGapSec between cycles)
+    //   RT (rising)   — triple kick, FLYWHEEL-GATED (waits for flywheelAtSpeed() each cycle)
+    //
+    // GAMEPAD2
+    //   RB (held)     — run intake in reverse (-0.5 power)
     // ═══════════════════════════════════════════════════════════════════════════
 
     private void handleGamepad1() {
@@ -264,7 +265,8 @@ public class BlueTeleop extends OpMode {
         if (gp1A && !lastGp1A) intakeOn = !intakeOn;
         lastGp1A = gp1A;
 
-        if (gamepad1.left_trigger > 0.5) {
+        // Intake reverse moved to gp2 RB.
+        if (gamepad2.right_bumper) {
             toggleMotor.setPower(-0.5);
         } else {
             toggleMotor.setPower(intakeOn ? 1.0 : 0.0);
@@ -272,39 +274,50 @@ public class BlueTeleop extends OpMode {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // KICKER SINGLE-PRESS (right trigger)
-    //
+    // KICKER SINGLE-PRESS (gp1 LB)
     // Rising edge → kicker UP. After kickerSinglePressSec elapses → kicker DOWN.
     // ═══════════════════════════════════════════════════════════════════════════
 
     private void handleKickerSinglePress() {
-        boolean gp1RT = gamepad1.right_trigger > 0.5;
+        boolean gp1LB = gamepad1.left_bumper;
+        if (gp1LB && !lastGp1LB) shooter.startKick();
+        lastGp1LB = gp1LB;
 
-        if (gp1RT && !lastGp1RT && !kickerSingleActive) {
-            kickerSingleActive = true;
-            kickerSingleTimer.reset();
-            kickerServo.setPosition(RobotConstants.kickerUpPos);
-        }
-        lastGp1RT = gp1RT;
-
-        if (kickerSingleActive && kickerSingleTimer.seconds() >= RobotConstants.kickerSinglePressSec) {
-            kickerServo.setPosition(RobotConstants.kickerDownPos);
-            kickerSingleActive = false;
-        }
+        shooter.updateKicker();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // KICKER MANUAL (bumpers)
+    // KICKER TRIPLE-KICK (gp1 RB = TIMED, gp1 RT = FLYWHEEL-GATED)
+    // Each rising edge starts a 3-cycle up-down sequence. The mode flag picks
+    // whether the cycle-to-cycle gap is timed or gated on flywheelAtSpeed().
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private void handleKickerTriple() {
+        boolean gp1RB = gamepad1.right_bumper;
+        if (gp1RB && !lastGp1RB) shooter.startTripleKick(false); // TIMED
+        lastGp1RB = gp1RB;
+
+        boolean gp1RT = gamepad1.right_trigger > 0.5;
+        if (gp1RT && !lastGp1RT) shooter.startTripleKick(true);  // FLYWHEEL-GATED
+        lastGp1RT = gp1RT;
+
+        shooter.updateTripleKick();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // KICKER MANUAL (gp1 LT)
     //
-    // Right bumper held → kicker UP. Left bumper held → kicker DOWN.
-    // Runs after handleKickerSinglePress so manual bumpers override the auto cycle.
+    // Held → kicker UP. Released → kicker DOWN. Suppressed while a single-press
+    // or triple-kick sequence is running so it can't fight the active sequence.
     // ═══════════════════════════════════════════════════════════════════════════
 
     private void handleKickerManual() {
-        if (gamepad1.right_bumper) {
-            kickerServo.setPosition(RobotConstants.kickerUpPos);
-        } else if (gamepad1.left_bumper) {
-            kickerServo.setPosition(RobotConstants.kickerDownPos);
+        if (shooter.isKicking() || shooter.isTripleKicking()) return;
+
+        if (gamepad1.left_trigger > 0.5) {
+            shooter.kickerUp();
+        } else {
+            shooter.kickerDown();
         }
     }
 

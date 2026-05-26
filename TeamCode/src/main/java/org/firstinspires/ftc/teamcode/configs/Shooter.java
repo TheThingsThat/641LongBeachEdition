@@ -7,6 +7,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.util.ElapsedTime;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
@@ -15,9 +16,27 @@ public class Shooter {
     // ─── Hardware ────────────────────────────────────────────────────────────
     public final DcMotor shooterR, shooterL, turretMotor;
     public final Servo   hoodServo;
+    public final Servo   kickerServo;
 
     private final Follower  follower;
     private final Telemetry telemetry;
+
+    // ─── Kicker single-press state ───────────────────────────────────────────
+    // One press/call drives the kicker UP, then auto-returns DOWN after
+    // RobotConstants.kickerSinglePressSec. Non-blocking: poll with updateKicker().
+    private boolean           kickerActive = false;
+    private final ElapsedTime kickerTimer  = new ElapsedTime();
+
+    // ─── Kicker triple-kick state ────────────────────────────────────────────
+    // Fires three up-down cycles. Two modes:
+    //   FLYWHEEL-GATED — each cycle starts only when flywheelAtSpeed() == true.
+    //   TIMED          — fixed kickerTripleCycleGapSec between cycles.
+    // Within every cycle, the kicker holds UP for kickerTripleUpDwellSec.
+    private boolean           tripleKickActive        = false;
+    private boolean           tripleKickFlywheelGated = false; // true = mode 1, false = mode 2
+    private int               tripleKickCyclesDone    = 0;     // 0..3
+    private int               tripleKickPhase         = 0;     // 0 = waiting, 1 = up
+    private final ElapsedTime tripleKickTimer         = new ElapsedTime();
 
     // ─── Turret PID state ────────────────────────────────────────────────────
     private double turretIntegral  = 0.0;
@@ -42,6 +61,10 @@ public class Shooter {
     public double lastTurretRelDeg = 0.0;
     public double lastFlywheelTPS  = 0.0;
 
+    private static final double[] SHOOTER_DISTANCES_IN = {50.0, 60.0, 90.0, 122.0, 154.0};
+    private static final double[] FLYWHEEL_TPS_TABLE   = {910.0, 970.0, 1220.0, 1220.0, 1350.0};
+    private static final double[] HOOD_SERVO_TABLE     = {0.55, 0.40, 0.28, 0.05, 0.08};
+
     public Shooter(HardwareMap hardwareMap, Follower follower, Telemetry telemetry) {
         this.follower  = follower;
         this.telemetry = telemetry;
@@ -50,6 +73,7 @@ public class Shooter {
         shooterL    = hardwareMap.get(DcMotor.class, "shooterL");
         turretMotor = hardwareMap.get(DcMotor.class, "turretMotor");
         hoodServo   = hardwareMap.get(Servo.class,   "hoodServo");
+        kickerServo = hardwareMap.get(Servo.class,   "servo");
 
         shooterR.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         shooterR.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
@@ -92,17 +116,13 @@ public class Shooter {
 
     /** Flywheel speed (TPS) from distance (inches). */
     public static double flywheelSpeed(double goalDist) {
-        double raw = 0.00514 * goalDist * goalDist
-                + 4 * goalDist
-                + 736;
-        return MathFunctions.clamp(raw + RobotConstants.flywheelOffset, 0, 1250);
+        double raw = interpolateShooterTable(goalDist, FLYWHEEL_TPS_TABLE);
+        return MathFunctions.clamp(raw + RobotConstants.flywheelOffset, 0, 1400);
     }
 
     /** Hood servo position from distance (inches). */
     public static double hoodAngle(double goalDist) {
-        double raw = 0.0000203 * goalDist * goalDist
-                - 0.00925 * goalDist
-                + 0.867;
+        double raw = interpolateShooterTable(goalDist, HOOD_SERVO_TABLE);
         return MathFunctions.clamp(raw + RobotConstants.hoodOffset, RobotConstants.hoodServoMin, RobotConstants.hoodServoMax);
     }
 
@@ -216,11 +236,132 @@ public class Shooter {
         return power;
     }
 
+    /**
+     * @return true if the measured flywheel velocity is within
+     *         RobotConstants.flywheelSpeedTolerance (default ±10%) of the target.
+     *         Always false when the target is non-positive (shooter idle).
+     */
+    public boolean flywheelAtSpeed() {
+        if (targetFlywheelTPS <= 0) return false;
+        double relError = Math.abs(targetFlywheelTPS - lastFlywheelTPS) / targetFlywheelTPS;
+        return relError <= RobotConstants.flywheelSpeedTolerance;
+    }
+
     /** Writes targetHoodServoPos to the hood servo. */
     public void driveHood() {
         double pos = clamp(targetHoodServoPos, RobotConstants.hoodServoMin, RobotConstants.hoodServoMax);
         hoodServo.setPosition(pos);
         telemetry.addData("HoodPos", "%.3f", pos);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // KICKER (single-press fire)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Begins one kick: drives the kicker UP now and arms the auto-return.
+     * No-op if a kick is already in progress. Call updateKicker() every loop
+     * to complete the sequence.
+     */
+    public void startKick() {
+        if (kickerActive || tripleKickActive) return;
+        kickerActive = true;
+        kickerTimer.reset();
+        kickerServo.setPosition(RobotConstants.kickerUpPos);
+    }
+
+    /**
+     * Advances the kick sequence — call once per loop. Returns the kicker to the
+     * DOWN position after RobotConstants.kickerSinglePressSec has elapsed.
+     * @return true while a kick is still in progress.
+     */
+    public boolean updateKicker() {
+        if (kickerActive && kickerTimer.seconds() >= RobotConstants.kickerSinglePressSec) {
+            kickerServo.setPosition(RobotConstants.kickerDownPos);
+            kickerActive = false;
+        }
+        return kickerActive;
+    }
+
+    /** @return true while a single-press kick is in progress. */
+    public boolean isKicking() {
+        return kickerActive;
+    }
+
+    /** Manual kicker positions (e.g. teleop bumper control). */
+    public void kickerUp()   { kickerServo.setPosition(RobotConstants.kickerUpPos); }
+    public void kickerDown() { kickerServo.setPosition(RobotConstants.kickerDownPos); }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // KICKER (triple-kick, 3 up-down cycles)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Begins a triple-kick sequence (3 up-down cycles). Non-blocking: poll with
+     * updateTripleKick() every loop.
+     *
+     * @param flywheelGated  true  → mode 1: each cycle waits for flywheelAtSpeed()
+     *                              before firing. The first cycle also waits.
+     *                       false → mode 2: cycles separated by
+     *                              RobotConstants.kickerTripleCycleGapSec. The first
+     *                              cycle fires immediately.
+     * No-op if a triple-kick is already in progress.
+     */
+    public void startTripleKick(boolean flywheelGated) {
+        if (tripleKickActive || kickerActive) return;
+        tripleKickActive        = true;
+        tripleKickFlywheelGated = flywheelGated;
+        tripleKickCyclesDone    = 0;
+        tripleKickPhase         = 0;          // waiting to fire cycle 1
+        tripleKickTimer.reset();
+    }
+
+    /**
+     * Advances the triple-kick state machine. Call once per loop.
+     * @return true while a triple-kick sequence is still in progress.
+     */
+    public boolean updateTripleKick() {
+        if (!tripleKickActive) return false;
+
+        if (tripleKickPhase == 0) {
+            // Phase 0 — waiting to fire the next cycle.
+            // Cycle-gap minimum: applies between cycles in BOTH modes.
+            boolean gapOk = (tripleKickCyclesDone == 0)
+                    || tripleKickTimer.seconds() >= RobotConstants.kickerTripleCycleGapSec;
+            boolean ready;
+            if (tripleKickFlywheelGated) {
+                // Mode 1: must satisfy flywheel-ready AND the cycle-gap floor.
+                // (First cycle still only waits on flywheel-ready; no prior cycle to gap from.)
+                ready = flywheelAtSpeed() && gapOk;
+            } else {
+                // Mode 2: pure timed gap; first cycle fires immediately.
+                ready = gapOk;
+            }
+            if (ready) {
+                kickerServo.setPosition(RobotConstants.kickerUpPos);
+                tripleKickTimer.reset();
+                tripleKickPhase = 1;
+            }
+        } else {
+            // Phase 1 — kicker UP, waiting upDwell before dropping it.
+            if (tripleKickTimer.seconds() >= RobotConstants.kickerTripleUpDwellSec) {
+                kickerServo.setPosition(RobotConstants.kickerDownPos);
+                tripleKickCyclesDone++;
+                tripleKickTimer.reset();             // restart timer for cycle-gap or flywheel-recovery wait
+                if (tripleKickCyclesDone >= 3) {
+                    tripleKickActive = false;        // done — three cycles complete
+                } else {
+                    tripleKickPhase = 0;             // back to wait-to-fire for next cycle
+                }
+            }
+        }
+
+        return tripleKickActive;
+    }
+
+    /** @return true while a triple-kick sequence is in progress. */
+    public boolean isTripleKicking() {
+        return tripleKickActive;
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -255,6 +396,28 @@ public class Shooter {
 
     private static double clamp(double v, double lo, double hi) {
         return Math.max(lo, Math.min(hi, v));
+    }
+
+    private static double interpolateShooterTable(double goalDist, double[] values) {
+        if (goalDist <= SHOOTER_DISTANCES_IN[0]) {
+            return values[0];
+        }
+
+        int lastIndex = SHOOTER_DISTANCES_IN.length - 1;
+        if (goalDist >= SHOOTER_DISTANCES_IN[lastIndex]) {
+            return values[lastIndex];
+        }
+
+        for (int i = 0; i < lastIndex; i++) {
+            double lowDist  = SHOOTER_DISTANCES_IN[i];
+            double highDist = SHOOTER_DISTANCES_IN[i + 1];
+            if (goalDist <= highDist) {
+                double t = (goalDist - lowDist) / (highDist - lowDist);
+                return values[i] + t * (values[i + 1] - values[i]);
+            }
+        }
+
+        return values[lastIndex];
     }
 
     private static double wrapRad(double rad) {

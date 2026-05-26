@@ -7,7 +7,7 @@ import com.bylazar.configurables.annotations.Configurable;
 public class RobotConstants {
 
     // ─── Robot Poses ─────────────────────────────────────────────────────────
-    public static Pose blueGoal = new Pose(6.5, 134, 0);
+    public static Pose blueGoal = new Pose(8, 133.5, 0);
     public static Pose redGoal  = blueGoal.mirror();
 
     public static Pose blueReset = new Pose(132, 9.5, Math.toRadians(90)); // robot faces red goal
@@ -16,7 +16,7 @@ public class RobotConstants {
     public static Pose blueAutoEnd = new Pose(63.9, 105.77, Math.toRadians(180));
     public static Pose redAutoEnd  = blueAutoEnd.mirror();
 
-    public static Pose startPose = new Pose(21.0, 122.0, Math.toRadians(143.5));
+    public static Pose startPose = new Pose(22.0, 123.0, Math.toRadians(143.5));
     public static Pose scorePose = new Pose(52,    79.2,   Math.toRadians(180));
     public static Pose parkPose  = new Pose(63.9,  105.77, Math.toRadians(180));
 
@@ -42,11 +42,12 @@ public class RobotConstants {
     public static double hoodServoMin = 0.00;
 
     // ─── Flywheel / Shooter ──────────────────────────────────────────────────
-    public static double FLYWHEEL_KP = 0.001;
+    public static double FLYWHEEL_KP = 0.002;
     public static double FLYWHEEL_KI = 0.000001;
     public static double FLYWHEEL_KD = 0.0;
     public static double FLYWHEEL_KF = 0.0005;
     public static double SHOOTER_I_MAX = 0.4;
+    public static double flywheelSpeedTolerance = 0.10; // fraction of target (0.10 = ±10%)
 
     // ─── Turret ──────────────────────────────────────────────────────────────
     public static double ppModeAngleTolerance = 0.5; // degrees
@@ -70,7 +71,7 @@ public class RobotConstants {
     public static double lockedFlywheelTPS = 1450.0;
 
     // ─── Fixed shooter positions (TURRET_ONLY and FULL_MANUAL modes) ─────────
-    public static double fixedFlywheelTPS = 1550;
+    public static double fixedFlywheelTPS = 800;
     public static double fixedHoodPos     = 0.25;
 
     // ─── Full-Adjustable mode step sizes ─────────────────────────────────────
@@ -80,5 +81,9 @@ public class RobotConstants {
     // ─── Kicker ──────────────────────────────────────────────────────────────
     public static double kickerDownPos        = 0.35;
     public static double kickerUpPos          = 0.51;
-    public static double kickerSinglePressSec = 1.0; // RB single-press up→down dwell
+    public static double kickerSinglePressSec = 1.2; // RB single-press up→down dwell
+
+    // ─── Triple-kick ─────────────────────────────────────────────────────────
+    public static double kickerTripleUpDwellSec   = 0.1; // up→down dwell within each of the 3 cycles
+    public static double kickerTripleCycleGapSec  = 0.50; // gap between cycles
 }
