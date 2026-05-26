@@ -41,7 +41,7 @@ public class BlueFarAuto extends OpMode {
 
     // ── Timing / state-machine helpers ────────────────────────────────────────
     private Timer pathTimer;          // resets on every state change
-    private boolean pathStarted;      // guards followPath()/startKick() so they fire once per state
+    private boolean pathStarted;      // guards followPath()/startTripleKick() so they fire once per state
 
     // ── State constants (chassis movement only for now) ────────────────────────
     private static final int STATE_SHOOT_PRELOAD = 0; // sitting at start/shoot zone, fire preload
@@ -106,7 +106,7 @@ public class BlueFarAuto extends OpMode {
         shooter.driveTurret();
         shooter.driveFlywheels(true); // flywheel spins the whole auto
         shooter.driveHood();
-        shooter.updateKicker();       // advances any in-progress kick
+        shooter.updateTripleKick();   // advances any in-progress flywheel-gated triple kick
 
         handleIntake();           // forward 1.0, or reverse burst after a kick
 
@@ -255,10 +255,10 @@ public class BlueFarAuto extends OpMode {
         switch (pathState) {
             // ── Preload shot (already sitting in the shoot zone) ───────────────
             case STATE_SHOOT_PRELOAD:
-                // Wait for the flywheel to reach speed before firing.
                 if (!pathStarted) {
-                    if (shooter.flywheelAtSpeed()) { shooter.startKick(); pathStarted = true; }
-                } else if (!shooter.isKicking()) {
+                    shooter.startTripleKick(true);
+                    pathStarted = true;
+                } else if (!shooter.isTripleKicking()) {
                     startIntakeReverse();
                     setPathState(STATE_PATH1);
                 }
@@ -277,8 +277,9 @@ public class BlueFarAuto extends OpMode {
 
             case STATE_SHOOT1:
                 if (!pathStarted) {
-                    if (shooter.flywheelAtSpeed()) { shooter.startKick(); pathStarted = true; }
-                } else if (!shooter.isKicking()) {
+                    shooter.startTripleKick(true);
+                    pathStarted = true;
+                } else if (!shooter.isTripleKicking()) {
                     startIntakeReverse();
                     setPathState(STATE_PATH3);
                 }
@@ -302,8 +303,9 @@ public class BlueFarAuto extends OpMode {
 
             case STATE_SHOOT2:
                 if (!pathStarted) {
-                    if (shooter.flywheelAtSpeed()) { shooter.startKick(); pathStarted = true; }
-                } else if (!shooter.isKicking()) {
+                    shooter.startTripleKick(true);
+                    pathStarted = true;
+                } else if (!shooter.isTripleKicking()) {
                     startIntakeReverse();
                     setPathState(STATE_PATH6);
                 }
@@ -322,8 +324,9 @@ public class BlueFarAuto extends OpMode {
 
             case STATE_SHOOT3:
                 if (!pathStarted) {
-                    if (shooter.flywheelAtSpeed()) { shooter.startKick(); pathStarted = true; }
-                } else if (!shooter.isKicking()) {
+                    shooter.startTripleKick(true);
+                    pathStarted = true;
+                } else if (!shooter.isTripleKicking()) {
                     startIntakeReverse();
                     setPathState(STATE_PATH8);
                 }
@@ -342,8 +345,9 @@ public class BlueFarAuto extends OpMode {
 
             case STATE_SHOOT4:
                 if (!pathStarted) {
-                    if (shooter.flywheelAtSpeed()) { shooter.startKick(); pathStarted = true; }
-                } else if (!shooter.isKicking()) {
+                    shooter.startTripleKick(true);
+                    pathStarted = true;
+                } else if (!shooter.isTripleKicking()) {
                     startIntakeReverse();
                     setPathState(STATE_PATH10);
                 }
@@ -362,8 +366,9 @@ public class BlueFarAuto extends OpMode {
 
             case STATE_SHOOT5:
                 if (!pathStarted) {
-                    if (shooter.flywheelAtSpeed()) { shooter.startKick(); pathStarted = true; }
-                } else if (!shooter.isKicking()) {
+                    shooter.startTripleKick(true);
+                    pathStarted = true;
+                } else if (!shooter.isTripleKicking()) {
                     startIntakeReverse();
                     setPathState(STATE_PATH12);
                 }
